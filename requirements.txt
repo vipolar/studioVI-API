@@ -1,0 +1,8 @@
+Flask
+psutil
+huggingface_hub
+flask-jwt-extended
+flask-sqlalchemy
+flask-bcrypt
+flask-cors
+bcrypt
