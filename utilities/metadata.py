@@ -4,67 +4,6 @@ from pathlib import Path
 import logging
 import json
 
-def deserialize_metadata(metadata: Dict[str, Any], deserializationDepth: int = 0) -> Dict[str, Any]:
-    """
-    Deserializes a metadata dictionary by pruning nested objects based on deserialization thresholds.
-
-    This function recursively traverses the input metadata dictionary and removes any nested objects 
-    that specify a `deserializationThreshold` value greater than the given `deserializationDepth`. 
-    If a threshold is encountered and the provided depth is insufficient, the corresponding object 
-    (and its children) will be replaced with an empty dictionary. Additionally, the `deserializationThreshold` 
-    key is removed from the final output.
-
-    Args:
-        metadata (Dict[str, Any]): The metadata dictionary to process. Must be a dictionary.
-        deserializationDepth (int): The maximum depth at which deserialization is allowed. Must be a non-negative integer.
-
-    Returns:
-        dict: A pruned version of the original metadata, with restricted structures removed. Returns None if the input is invalid.
-
-    Notes:
-        - Any non-dictionary or non-list items are preserved as-is.
-        - If `metadata` is not a dictionary or if `deserializationDepth` is not an integer, `None` is returned.
-        - Negative value of `deserializationThreshold` is considered a maximum threshold,
-          which means that the object will be removed regardless of the deserialization depth.
-    """
-    if not isinstance(metadata, dict):
-        logging.debug(f"Provided metadata cannot be deserialized, invalid type: {type(metadata).__name__}")
-        return None
-    
-    if not isinstance(deserializationDepth, int):
-        logging.debug(f"Deserialization depth cannot be set, invalid type: {type(deserializationDepth).__name__}")
-        return None
-    
-    def prune_object(obj: Any) -> Any:
-        if isinstance(obj, dict):
-            if "deserializationThreshold" in obj:
-                deserializationThreshold = obj["deserializationThreshold"]
-                if isinstance(deserializationThreshold, int):
-                    logging.debug(f"Deserialization threshold set to a new value: {deserializationThreshold}")
-                    if deserializationThreshold < 0:
-                        logging.debug(f"Negative deserialization threshold, ignoring deserialization depth, removing object")
-                        return {}
-                    if deserializationDepth < deserializationThreshold:
-                        logging.debug(f"Deserialization threshold exceeds deserialization depth, removing object")
-                        return {}
-
-            filtered_obj = {}
-            logging.debug(f"Rebuilding metadata object with keys: {", ".join(obj.keys())}")
-            for key, value in obj.items():
-                if key == "deserializationThreshold":
-                    logging.debug(f"Deserialization threshold key 'deserializationThreshold' filtered out")
-                    continue
-                logging.debug(f"Pruning key and re-indexing its value: {key}")
-                filtered_obj[key] = prune_object(value)
-            return filtered_obj
-        elif isinstance(obj, list):
-            return [prune_object(item) for item in obj]
-
-        return obj
-
-    logging.debug(f"Attempting to prune metadata object with deserialization depth: {deserializationDepth}")
-    return prune_object(metadata)
-
 def find_metadata_files(base_dir: str=None, metadata_file: str=None, metadata_identifier: List[str]=None, metadata_accepted_types: List[str]=None):
     """
     Recursively scans a base directory for metadata files and indexes them into a registry.
@@ -154,49 +93,349 @@ def find_metadata_files(base_dir: str=None, metadata_file: str=None, metadata_id
     logging.debug(f"Successfully indexed metadata files in '{base_dir}' with accepted types: {', '.join(metadata_accepted_types)}")
     return metadata_map
 
-def extract_metadata_properties(metadata: dict,  keys: List[str], mode: str="include", strict: bool=False):
+def filter_metadata_properties(metadata: dict,  keys: List[str], depth: int=0):
     """
-    Extracts or excludes specific keys from a metadata dictionary based on the selected mode.
+    Filters out specific keys from a metadata dictionary based on the provided list of keys.
 
-    Modes:
-        - "include": Returns a dictionary with only the specified keys.
-                     If `strict` is True, raises a KeyError if any key is missing.
-        - "exclude": Returns a dictionary without the specified keys.
-    
     Parameters:
         metadata (dict): The metadata dictionary to filter.
-        keys (List[str]): List of keys to include or exclude considering the mode.
-        mode (str): "include" to return only specified keys, "exclude" to remove them.
-        strict (bool): If True (and mode is "include"), raises KeyError for any missing keys.
+        keys (List[str]): List of keys to exclude from the metadata.
+        depth (int): The depth of the metadata structure to consider for filtering.
 
     Returns:
-        dict: Filtered dictionary based on mode and keys,
+        dict: Filtered dictionary based on the provided list of keys,
                     or `None` in case of a failure.
     """
     if not isinstance(metadata, dict):
         logging.debug(f"Provided object is not a valid metadata object")
         return None
-
-    if mode not in {"include", "exclude"}:
-        logging.debug(f"Invalid extraction mode provided: {mode}")
-        return None
-
-    if mode == "include":
-        if strict:
-            logging.debug(f"Strict mode enabled, checking for required key(s): {keys}")
-            missing_keys = [key for key in keys if key not in metadata]
-            if missing_keys:
-                logging.debug(f"Missing required key(s): {', '.join(missing_keys)}")
-                return None
-
-        included = {key: metadata[key] for key in keys if key in metadata}
-        logging.debug(f"Included key(s): {list(included.keys())}")
-        return included
     
+    if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+        logging.debug(f"Provided keys object is invalid, must be a list of strings")
+        return None
+    
+    if not isinstance(depth, int) or (depth < 0 and depth != -1):
+        logging.debug(f"Provided depth is not a valid integer value, defaulting to 0")
+        depth = 0
 
-    excluded = {key: value for key, value in metadata.items() if key not in keys}
-    logging.debug(f"Excluded key(s): {list(excluded.keys())}")
-    return excluded
+    filtered_metadata = {}
+    logging.debug(f"Rebuilding metadata object excluding keys: {", ".join(keys())}")
+    for key, value in metadata.items():
+        if key not in keys:
+            logging.debug(f"Re-indexing the value of key: {key}")
+            filtered_metadata[key] = value
+    return filtered_metadata
+
+def extract_metadata_properties(metadata: dict,  keys: List[str], strict: bool=False):
+    """
+    Extracts specific keys from a metadata dictionary based on the provided list of keys.
+    
+    Parameters:
+        metadata (dict): The metadata dictionary to filter.
+        keys (List[str]): List of keys to include or exclude considering the mode.
+        strict (bool): Raises KeyError for any missing keys if set to True.
+
+    Returns:
+        dict: Filtered dictionary based on the provided list of keys,
+                    or `None` in case of a failure.
+    """
+    if not isinstance(metadata, dict):
+        logging.debug(f"Provided object is not a valid metadata object")
+        return None
+    
+    if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+        logging.debug(f"Provided keys object is invalid, must be a list of strings")
+        return None
+    
+    if not isinstance(strict, bool):
+        logging.debug(f"Provided strict mode is not a valid boolean value, defaulting to False")
+        strict = False
+
+    if strict:
+        logging.debug(f"Strict mode enabled, checking for required key(s): {keys}")
+        missing_keys = [key for key in keys if key not in metadata]
+        if missing_keys:
+            logging.debug(f"Missing required key(s): {', '.join(missing_keys)}")
+            return None
+
+    included = {key: metadata[key] for key in keys if key in metadata}
+    logging.debug(f"Included key(s): {list(included.keys())}")
+    return included
+
+def process_keys(obj: dict, keys: List[str], strict: bool = False) -> Dict[str, List[str]]:
+    """
+    Processes a list of hierarchical metadata keys and maps them to their corresponding base keys 
+    in a provided dictionary. Supports wildcard-based prioritization (`**` and `*`) and recursive key matching.
+
+    This function is primarily used to prepare a mapping of keys for metadata deserialization or filtering. 
+    It breaks down dot-separated keys into root keys and subkeys (e.g., "user.name" → "user": ["name"]) 
+    and handles special wildcard patterns:
+    
+        - Keys starting with `**` are given highest priority.
+        - Keys starting with `*` are given second priority.
+        - Other keys follow in alphanumeric order.
+
+    If a key cannot be found and `strict` is `True`, a `KeyError` is raised. Otherwise, missing keys are silently ignored.
+    If a key is duplicated (i.e., the same key appears more than once in the input list), it is only processed once.
+    If a subkey has already been captured by a wildcard, it is not added again to avoid duplication.
+    If '**' or '*' can be matched to the root of a key, they are treated as valid keys.
+
+    Parameters:
+        obj (dict): The dictionary whose keys are matched against the input list.
+        keys (List[str]): List of dot-separated string keys to process.
+        strict (bool): Whether to enforce strict matching (raise `KeyError` on missing keys).
+
+    Returns:
+        A tuple containing:
+            processed_keys (Dict[str, List[str]]): A dictionary mapping top-level keys in `obj` excluding the wildcards.
+            wildcard_keys (List[str] | None): List of subkeys associated with the wildcard `*`, or `None` if not used.
+            joker_keys (List[str] | None): List of subkeys associated with the wildcard `**`, or `None` if not used.
+
+    Raises:
+        KeyError: If `strict` is `True` and no part of the key exists in `obj`.
+
+    Example:
+        >>> obj = {"user": {"name": "Alice"}, "system": {"os": "Linux"}}
+        >>> keys = ["user.name", "system.os", "**.debug"]
+        >>> process_keys(obj, keys, True)
+        {
+            "user": ["name"],
+            "system": ["os"],
+            "**": ["debug"]
+        }
+    """
+    logging.debug(f"Sorting keys by WildCards('**', '*') first and Alphanumeric values second to prioritize the WildCards and avoid repetead matches")
+    sorted_keys = sorted(keys, key=lambda x: (0 if x.startswith("**") else 1 if x.startswith("*") else 2, x))
+    logging.debug(f"Sorted keys: {", ".join(obj.keys())}")
+    exact_match_keys = {}
+    wildcard_keys = None
+    joker_keys  =  None
+    for key in sorted_keys:
+        original_key = key
+        while True:
+            logging.debug(f"Attempting to match key: '{key}'")
+            while key not in obj.keys() and key not in {"*", "**"}:
+                logging.debug(f"Full key couldn't be matched to an entry. Attempting to split the key and match the root part")
+                key_parts = key.rsplit('.', 1)
+                logging.debug(f"Key successfully split into: '{key}' -> '{key_parts[0]}' and '{key_parts[1] if len(key_parts) > 1 else ''}'")
+                if key_parts[0] == key:
+                    if strict:
+                        logging.debug(f"Key '{key}' not found in the provided metadata, raising 'KeyError' as the existence of the provided keys is enforced strictly")
+                        raise KeyError(f"Key '{key}' not found in the provided metadata")
+                    logging.debug(f"Key '{key}' not found in the provided metadata, skipping the key as the existence of the provided keys is not enforced strictly")
+                    break
+                logging.debug(f"Key was split successfully. Remapping the root of the split as the key to use in the further attempts to match: '{key_parts[0]}'")
+                key = key_parts[0]
+
+            if key in obj or key in {"*", "**"}:
+                next_step_key = None
+                logging.debug(f"Extracting a sub-key from the original key: '{original_key}'")
+                if original_key.startswith(key + "."):
+                    next_step_key = original_key[len(key) + 1:]
+                    if next_step_key is not None:
+                        logging.debug(f"Sub-key extracted successfully: '{next_step_key}'")
+                    else:
+                        logging.debug(f"Couldn't extract a valid sub-key from: '{key}'")
+
+                if key not in obj:
+                    if key == "*":
+                        if wildcard_keys is None:
+                            logging.debug(f"WildCard('*') detected, initializing the wildcard keys list")
+                            wildcard_keys = []
+                        if next_step_key:
+                            logging.debug(f"Successfully indexed a new sub-key under the WildCard('*'): '{next_step_key}'")
+                            wildcard_keys.append(next_step_key)
+                        break
+
+                    if key == "**":
+                        if joker_keys is None and next_step_key is not None:
+                            logging.debug(f"WildCard('**') detected, initializing the joker keys list with the first sub-key: '{next_step_key}'")
+                            joker_keys = [next_step_key]
+                        elif joker_keys and next_step_key is not None:
+                            logging.debug(f"Successfully indexed a new sub-key under the WildCard('**'): '{next_step_key}'")
+                            joker_keys.append(next_step_key)
+                        elif next_step_key is None:
+                            logging.debug(f"WildCard('**') without a sub-key — catchall mode enabled!")
+                            joker_keys = []
+                        break
+
+                if key == "*":
+                    logging.debug(f"WildCard('*') trap detected. Wildcard keys of the level will only match exactly to the sub-keys within")
+
+                if key == "**":
+                    logging.debug(f"WildCard('**') trap detected. Joker keys of the level will only match exactly to the sub-keys within")
+
+                if key in exact_match_keys:
+                    logging.debug(f"Key has already been processed and indexed. Checking sub-keys for the possibility of key collision")
+
+                    if joker_keys and next_step_key in joker_keys: 
+                        logging.debug(f"Sub-key has already been captured by the WildCard('**') and is thus discarded as a duplicate")
+                        break
+                    if wildcard_keys and next_step_key in wildcard_keys:
+                        logging.debug(f"Sub-key has already been captured by the WildCard('*') and is thus discarded as a duplicate")
+                        break
+
+                    if next_step_key is None or next_step_key in exact_match_keys[key]:
+                        if next_step_key in exact_match_keys[key]:
+                            logging.debug(f"A duplicate sub-key detected in an already indexed key: '{key}': '{next_step_key}'")
+
+                        # A Comment
+                        logging.debug(f"Attempting to split the key further down to extract a possible deeper root: '{key}'")
+                        key_parts = key.rsplit('.', 1)
+                        if key_parts[0] != key:
+                            logging.debug(f"Successfully extracted a deeper root from the key: '{key}': '{key_parts[0]}'")
+                            key = key_parts[0]
+                            continue
+
+                        logging.debug(f"Key couldn't be split down any further, definitively proving it is a duplicate")
+                        break
+
+                    logging.debug(f"Successfully indexed a sub-key under an existing key: '{key}': '{next_step_key}'")
+                    exact_match_keys[key].append(next_step_key)
+                else:
+                    exact_match_keys[key] = []
+                    if next_step_key is not None:
+                        if joker_keys and next_step_key in joker_keys:
+                            logging.debug(f"Sub-key has already been captured by the WildCard('**') and is thus discarded as a duplicate")
+                            break
+                        if wildcard_keys and next_step_key in wildcard_keys:
+                            logging.debug(f"Sub-key has already been captured by the WildCard('*') and is thus discarded as a duplicate")
+                            break
+
+                        logging.debug(f"Successfully indexed a new key together along with the new sub-key: '{key}': '{next_step_key}'")
+                        exact_match_keys[key].append(next_step_key)
+                        break
+                    logging.debug(f"Successfully indexed a new key: '{key}'")
+    
+            break #the infinity (loop) and beyond!
+        
+    logging.debug(f"Returning processed keys as a valid JSON dictionary: \n{json.dumps(exact_match_keys, indent=4)}")
+    return exact_match_keys, wildcard_keys, joker_keys
+
+def deserialize_metadata(metadata: dict, extract_keys: List[str], exclude_keys: List[str], extract_strict: bool=False, exclude_strict: bool=False):
+    """
+    obj key in processed_keys? pass object[key] along with processed_keys[key] and so on...
+    **.obj.otherObj meant at any depth, when obj is found, otherObj is processed (exclusion only?)
+    """
+    deserialized_metadata = {}
+    if not metadata or not isinstance(metadata, dict):
+        logging.debug(f"Metadata to deserialize must be provided as a non-empty JSON dictionary, got {type(metadata).__name__} instead")
+        raise TypeError(f"Metadata to deserialize must be provided as a non-empty JSON dictionary, got {type(metadata).__name__} instead")
+    
+    if not isinstance(extract_keys, list) or not all(isinstance(key, str) for key in extract_keys):
+        logging.debug(f"Keys to extract from the metadata must be provided as a list of strings, got {type(extract_keys).__name__} instead")
+        raise TypeError(f"Keys to extract from the metadata must be provided as a list of strings, got {type(extract_keys).__name__} instead")
+
+    if not isinstance(exclude_keys, list) or not all(isinstance(key, str) for key in exclude_keys):
+        logging.debug(f"Keys to filter out from the metadata must be provided as a list of strings, got {type(exclude_keys).__name__} instead")
+        raise TypeError(f"Keys to filter out from the metadata must be provided as a list of strings, got {type(exclude_keys).__name__} instead")
+    
+    if not isinstance(extract_strict, bool):
+        logging.debug(f"Should the 'keys to extract' be enforced strictly must be provided as a bool, got {type(extract_strict).__name__} instead")
+        raise TypeError(f"Should the 'keys to extract' be enforced strictly must be provided as a bool, got {type(extract_strict).__name__} instead")
+
+    if not isinstance(exclude_strict, bool):
+        logging.debug(f"Should the 'keys to filter out' be enforced strictly must be provided as a bool, got {type(exclude_strict).__name__} instead")
+        raise TypeError(f"Should the 'keys to filter out' be enforced strictly must be provided as a bool, got {type(exclude_strict).__name__} instead")
+
+    #at some point we might integrate process_keys back into this method
+    if not extract_keys and not exclude_keys:
+        logging.debug(f"No keys to extract or filter out were provided, returning the original metadata object")
+        return metadata
+    
+    def extract_entries(obj: dict,  keys: List[str], strict: bool=False):
+        exact_match_keys, wildcard_keys, joker_keys = process_keys(obj, keys, strict)
+
+        joker_extractions = {}
+        wildcard_extractions = {}
+        exact_match_extractions = {}
+
+        if joker_keys is not None and not joker_keys:
+            return obj
+
+        for key, value in obj.items():
+            if isinstance(value, dict):
+                if joker_keys is not None:
+                    processed_joker_keys = [entry for entry in keys if entry.startswith("**")] + joker_keys
+                    unconfirmed_joker_extraction = extract_entries(value, processed_joker_keys, False)
+                    for u_j_e_key, u_j_e_value in unconfirmed_joker_extraction.items():
+                        if u_j_e_key not in joker_keys:
+                            if not u_j_e_value:
+                                continue
+
+                        if key not in joker_extractions:
+                            joker_extractions[key] = {}
+                        joker_extractions[key][u_j_e_key] = u_j_e_value
+
+                if wildcard_keys is not None:
+                    wildcard_extractions[key] = extract_entries(value, wildcard_keys, False)
+
+                if key in exact_match_keys:
+                    exact_match_extractions[key] = extract_entries(value, exact_match_keys[key], strict)
+            elif isinstance(value, list):
+                #_extracted_metadata[key] = [extract_metadata_entries(item) for item in value] list operations to be implemented
+                pass
+            else: 
+                if key in exact_match_keys or wildcard_keys and key in wildcard_keys or joker_keys and key in joker_keys:
+                    exact_match_extractions[key] = value
+
+        def merge_objs(obj1={}, obj2={}, obj3={}):
+            merged_obj = {}
+
+            for obj in [obj1, obj2, obj3]:
+                for key, value in obj.items():
+                    if key not in merged_obj:
+                        merged_obj[key] = value
+                    elif isinstance(value, dict):
+                        merged_obj[key] = merge_objs(merged_obj[key], value)  
+            return merged_obj              
+
+        return merge_objs(joker_extractions, wildcard_extractions, exact_match_extractions)
+
+    def exclude_entries(obj: dict,  keys: List[str], strict: bool=False):
+        exact_match_keys, wildcard_keys, joker_keys = process_keys(obj, keys, strict)
+
+        if joker_keys is not None and not joker_keys:
+            return {}
+
+        if wildcard_keys is not None and not wildcard_keys:
+            return {}
+
+        filtered_metadata = {}
+        for key, value in obj.items():
+            if isinstance(value, dict):
+                if key not in exact_match_keys:
+                    filtered_metadata[key] = value
+                elif exact_match_keys[key]:
+                    filtered_metadata[key] = exclude_entries(value, exact_match_keys[key], strict)
+
+                if wildcard_keys and key in filtered_metadata:
+                    filtered_metadata[key] = exclude_entries(filtered_metadata[key], wildcard_keys, False)
+
+                if joker_keys and key in filtered_metadata:
+                    processed_joker_keys = [entry for entry in keys if entry.startswith("**")] + joker_keys
+                    filtered_metadata[key] = exclude_entries(filtered_metadata[key], processed_joker_keys, False)
+            elif isinstance(value, list):
+                #_extracted_metadata[key] = [extract_metadata_entries(item) for item in value] list operations to be implemented
+                pass
+            else: 
+                if wildcard_keys and key in wildcard_keys:
+                    continue
+                if joker_keys and key in joker_keys:
+                    continue
+                if key in exact_match_keys:
+                    continue
+
+                filtered_metadata[key] = value
+        return filtered_metadata
+
+    if extract_keys:
+        deserialized_metadata = extract_entries(metadata, extract_keys, extract_strict)
+
+    if exclude_keys:
+        deserialized_metadata = exclude_entries(deserialized_metadata if deserialized_metadata else metadata, exclude_keys, exclude_strict)
+    
+    return deserialized_metadata
 
 def read_metadata_property(metadata: dict, keys: List[str] | str) -> Any:
     """

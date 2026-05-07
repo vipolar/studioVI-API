@@ -1,6 +1,5 @@
+from utilities.authutilities import authentication_required, generate_token, invalidate_token
 from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
-from utilities.authutilities import generate_token, invalidate_token
-from utilities.decorators import authentication_required
 from flask import Flask, request, jsonify
 from models import db, User, bcrypt
 from routes import api_blueprint
@@ -14,8 +13,8 @@ app.register_blueprint(api_blueprint)
 jwtmg = JWTManager(app)
 bcrypt.init_app(app)
 db.init_app(app)
-CORS(app, supports_credentials=True, origins=["http://localhost:5173"])
 
+CORS(app, supports_credentials=True, origins=["http://localhost:5173"])
 
 @app.route("/login", methods=["POST"])
 def login():

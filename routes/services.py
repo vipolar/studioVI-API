@@ -1,6 +1,6 @@
 from utilities.metadata import extract_metadata_properties, deserialize_metadata
 from flask import Blueprint, Response, request, jsonify, stream_with_context
-from utilities.decorators import authentication_required
+from utilities.authutilities import authentication_required
 from flask import current_app as app
 from globals import components
 from string import Template
@@ -49,7 +49,7 @@ def services_get_all():
         print(f"Failed to read available services metadata: {str(e)}") #DEBUG
         return jsonify({"error": f"Failed to read available services metadata: {str(e)}", "success": False}), 200
     
-    return jsonify({"services": all_services_metadata, "success": True}), 200
+    return jsonify(all_services_metadata), 200
 
 @services_blueprint.route('/get/<service_id>', methods=['GET'])
 def services_get_service(service_id):
@@ -428,7 +428,7 @@ def services_interrupt_service_instance(service_id, command_id, instance_uuid):
 
                         for process in terminated:
                             processes.remove(process)
-                    
+
                     try:
                         psutil.wait_procs(processes, timeout=timeout // 2 if timeout > 0 else None)
                     except Exception:

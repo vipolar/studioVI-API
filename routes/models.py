@@ -1,4 +1,4 @@
-from utilities.metadata import extract_metadata_properties, read_metadata_property, deserialize_metadata
+from utilities.metadata import extract_metadata_properties, read_metadata_property, deserialize_metadata, filter_metadata_properties
 from flask import Blueprint, Response, request, jsonify, stream_with_context
 from contextlib import redirect_stdout, redirect_stderr
 from huggingface_hub import hf_hub_download
@@ -15,23 +15,37 @@ running_model_instances = {}
 
 @models_blueprint.route('/get/all', methods=['GET'])
 def models_get_all():
-    extensive = str(request.args.get('extensive', 'false')).lower() in ('true', '1', 'yes')
-    include_data_keys = ["name", "description"]
-    exclude_data_keys = ["identifier"]
+    strict = str(request.args.get('strict', 'false')).lower() in ('true', '1', 'yes')
+    extract_data_keys = request.args.getlist('extract')
+    exclude_data_keys = request.args.getlist('exclude')
+    depth = int(request.args.get('depth', 3))
     all_models_metadata = []
     extracted_metadata = {}
 
+    print(f"Extract data keys: {extract_data_keys}, Exclude data keys: {exclude_data_keys}, Depth: {depth}") #DEBUG
     try:
         for key, value in components.models.items():
-            if extensive:
-                extracted_metadata = extract_metadata_properties(value["data"], exclude_data_keys, "exclude", False)
-            else:
-                extracted_metadata = extract_metadata_properties(value["data"], include_data_keys, "include", True)
+            if extract_data_keys:
+                if not isinstance(extract_data_keys, list):
+                    raise ValueError("Extract data keys must be a list")
+                if not all(isinstance(k, str) for k in extract_data_keys):
+                    raise ValueError("All extract data keys must be strings")
+
+                extracted_metadata = extract_metadata_properties(value["data"], extract_data_keys, strict)
+
+            if exclude_data_keys:
+                if not isinstance(extract_data_keys, list):
+                    raise ValueError("Exclude data keys must be a list")
+                if not all(isinstance(k, str) for k in extract_data_keys):
+                    raise ValueError("All exclude data keys must be strings")
+
+                extracted_metadata = filter_metadata_properties(extracted_metadata if extracted_metadata else value["data"], exclude_data_keys, depth)
+                
 
             if extracted_metadata is None:
                 raise KeyError(f"Service '{key}' has no valid metadata") #TODO: better error message
         
-            extracted_metadata = deserialize_metadata(extracted_metadata, 3 if extensive else 1)
+            extracted_metadata = deserialize_metadata(extracted_metadata, 3 if strict else 1)
             if extracted_metadata is None:
                 raise KeyError(f"Service '{key}' has no valid metadata") #TODO: better error message
         
@@ -40,7 +54,7 @@ def models_get_all():
         print(f"Failed to read available models metadata: {str(e)}") #DEBUG
         return jsonify({"error": f"Failed to read available models metadata: {str(e)}", "success": False}), 200
     
-    return jsonify({"models": all_models_metadata, "success": True}), 200
+    return jsonify(all_models_metadata), 200
 
 @models_blueprint.route('/get/<model_id>', methods=['GET'])
 def models_get_model(model_id):

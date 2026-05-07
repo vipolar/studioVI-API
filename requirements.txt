@@ -1,8 +1,12 @@
 Flask
 psutil
+hf_transfer
 huggingface_hub
+huggingface_hub[hf_transfer]
 flask-jwt-extended
 flask-sqlalchemy
 flask-bcrypt
 flask-cors
 bcrypt
+pytest
+pytest-flask

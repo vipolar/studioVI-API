@@ -4,7 +4,7 @@ import psutil
 import time
 import json
 
-usage_blueprint = Blueprint('usage', __name__)
+gages_blueprint = Blueprint('gages', __name__)
 
 def get_gpu_stats():
     while True:
@@ -28,7 +28,7 @@ def get_gpu_stats():
 
         time.sleep(2)
 
-@usage_blueprint.route('/gpu')
+@gages_blueprint.route('/gpu')
 def gpu_stream():
     return Response(get_gpu_stats(), content_type='text/event-stream')
 
@@ -48,6 +48,6 @@ def get_cpu_stats():
 
         time.sleep(2)
 
-@usage_blueprint.route('/cpu')
+@gages_blueprint.route('/cpu')
 def cpu_stream():
     return Response(get_cpu_stats(), content_type='text/event-stream')
